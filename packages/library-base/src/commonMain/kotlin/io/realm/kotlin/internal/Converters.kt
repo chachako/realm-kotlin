@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+@file:Suppress("NOTHING_TO_INLINE", "OVERRIDE_BY_INLINE")
 
 package io.realm.kotlin.internal
 
@@ -33,7 +34,6 @@ import io.realm.kotlin.internal.interop.RealmValue
 import io.realm.kotlin.internal.interop.Timestamp
 import io.realm.kotlin.internal.interop.ValueType
 import io.realm.kotlin.types.BaseRealmObject
-import io.realm.kotlin.types.ObjectId
 import io.realm.kotlin.types.RealmAny
 import io.realm.kotlin.types.RealmInstant
 import io.realm.kotlin.types.RealmObject
@@ -43,7 +43,6 @@ import io.realm.kotlin.types.geo.GeoCircle
 import io.realm.kotlin.types.geo.GeoPolygon
 import org.mongodb.kbson.BsonObjectId
 import org.mongodb.kbson.Decimal128
-import kotlin.native.concurrent.SharedImmutable
 import kotlin.reflect.KClass
 
 // This file contains all code for converting public API values into values passed to the C-API.
@@ -99,8 +98,7 @@ public inline fun realmValueToFloat(transport: RealmValue): Float = transport.ge
 public inline fun realmValueToDouble(transport: RealmValue): Double = transport.getDouble()
 public inline fun realmValueToObjectId(transport: RealmValue): BsonObjectId =
     BsonObjectId(transport.getObjectIdBytes())
-public inline fun realmValueToRealmObjectId(transport: RealmValue): ObjectId =
-    ObjectIdImpl(transport.getObjectIdBytes())
+
 public inline fun realmValueToRealmUUID(transport: RealmValue): RealmUUID = RealmUUIDImpl(transport.getUUIDBytes())
 @OptIn(ExperimentalUnsignedTypes::class)
 public inline fun realmValueToDecimal128(transport: RealmValue): Decimal128 =
@@ -146,6 +144,7 @@ internal inline fun realmValueToRealmAny(
                         ?.clazz
                         ?: throw IllegalArgumentException("The object class is not present in the current schema - are you using an outdated schema version?")
                     val realmObject = realmValueToRealmObject(realmValue, clazz, mediator, owner)
+                    @Suppress("UNCHECKED_CAST")
                     RealmAny.create(realmObject!! as RealmObject, clazz as KClass<out RealmObject>)
                 }
             }
@@ -219,6 +218,7 @@ internal abstract class CompositeConverter<T, S> :
 }
 
 // RealmValueConverter with default pass-through public-to-storage-type implementation
+@Suppress("UNCHECKED_CAST")
 internal abstract class PassThroughPublicConverter<T> : CompositeConverter<T, T>() {
     override fun fromPublic(value: T?): T? = passthrough(value) as T?
     override fun toPublic(value: T?): T? = passthrough(value) as T?
@@ -316,22 +316,7 @@ internal object ObjectIdConverter : PassThroughPublicConverter<BsonObjectId>() {
     override inline fun MemTrackingAllocator.toRealmValue(value: BsonObjectId?): RealmValue =
         objectIdTransport(value?.toByteArray())
 }
-
 // Top level methods to allow inlining from compiler plugin
-public inline fun objectIdToRealmObjectId(value: BsonObjectId?): ObjectId? =
-    value?.let { ObjectIdImpl(it.toByteArray()) }
-
-internal object RealmObjectIdConverter : PassThroughPublicConverter<ObjectId>() {
-    override inline fun fromRealmValue(realmValue: RealmValue): ObjectId? =
-        if (realmValue.isNull()) null else realmValueToRealmObjectId(realmValue)
-
-    override inline fun MemTrackingAllocator.toRealmValue(value: ObjectId?): RealmValue =
-        objectIdTransport(value?.let { it as ObjectIdImpl }?.bytes)
-}
-
-// Top level methods to allow inlining from compiler plugin
-public inline fun realmObjectIdToObjectId(value: ObjectId?): BsonObjectId? =
-    value?.let { BsonObjectId((it as ObjectIdImpl).bytes) }
 
 internal object RealmUUIDConverter : PassThroughPublicConverter<RealmUUID>() {
     override inline fun fromRealmValue(realmValue: RealmValue): RealmUUID? =
@@ -355,7 +340,6 @@ internal object Decimal128Converter : PassThroughPublicConverter<Decimal128>() {
         decimal128Transport(value)
 }
 
-@SharedImmutable
 internal val primitiveTypeConverters: Map<KClass<*>, RealmValueConverter<*>> =
     mapOf<KClass<*>, RealmValueConverter<*>>(
         Byte::class to ByteConverter,
@@ -365,8 +349,6 @@ internal val primitiveTypeConverters: Map<KClass<*>, RealmValueConverter<*>> =
         RealmInstant::class to RealmInstantConverter,
         RealmInstantImpl::class to RealmInstantConverter,
         BsonObjectId::class to ObjectIdConverter,
-        ObjectId::class to RealmObjectIdConverter,
-        ObjectIdImpl::class to RealmObjectIdConverter,
         RealmUUID::class to RealmUUIDConverter,
         RealmUUIDImpl::class to RealmUUIDConverter,
         ByteArray::class to ByteArrayConverter,
@@ -384,6 +366,7 @@ internal object RealmValueArgumentConverter {
     fun MemTrackingAllocator.kAnyToPrimaryKeyRealmValue(value: Any?): RealmValue {
         return value?.let { value ->
             primitiveTypeConverters[value::class]?.let { converter ->
+                @Suppress("UNCHECKED_CAST")
                 with(converter as RealmValueConverter<Any?>) {
                     publicToRealmValue(value)
                 }
@@ -402,6 +385,7 @@ internal object RealmValueArgumentConverter {
                         realmAnyToRealmValueWithoutImport(value)
                     else -> {
                         primitiveTypeConverters[value::class]?.let { converter ->
+                            @Suppress("UNCHECKED_CAST")
                             with(converter as RealmValueConverter<Any?>) {
                                 publicToRealmValue(value)
                             }
@@ -598,6 +582,7 @@ internal inline fun realmObjectToRealmReferenceOrError(
 }
 
 // Returns a converter fixed to convert objects of the given type in the context of the given mediator/realm
+@Suppress("UNCHECKED_CAST")
 internal fun <T> converter(
     clazz: KClass<T & Any>
 ): RealmValueConverter<T> = primitiveTypeConverters.getValue(clazz) as RealmValueConverter<T>

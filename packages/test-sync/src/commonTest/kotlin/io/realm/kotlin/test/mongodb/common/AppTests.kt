@@ -18,7 +18,6 @@ package io.realm.kotlin.test.mongodb.common
 
 import io.realm.kotlin.Realm
 import io.realm.kotlin.RealmConfiguration
-import io.realm.kotlin.internal.platform.appFilesDirectory
 import io.realm.kotlin.internal.platform.fileExists
 import io.realm.kotlin.internal.platform.runBlocking
 import io.realm.kotlin.log.LogLevel
@@ -33,7 +32,7 @@ import io.realm.kotlin.mongodb.LoggedOut
 import io.realm.kotlin.mongodb.Removed
 import io.realm.kotlin.mongodb.User
 import io.realm.kotlin.mongodb.annotations.ExperimentalEdgeServerApi
-import io.realm.kotlin.mongodb.exceptions.InvalidCredentialsException
+import io.realm.kotlin.mongodb.exceptions.AuthException
 import io.realm.kotlin.mongodb.exceptions.ServiceException
 import io.realm.kotlin.mongodb.sync.SyncConfiguration
 import io.realm.kotlin.test.mongodb.SyncServerConfig
@@ -43,6 +42,7 @@ import io.realm.kotlin.test.mongodb.asTestApp
 import io.realm.kotlin.test.mongodb.common.utils.assertFailsWithMessage
 import io.realm.kotlin.test.mongodb.createUserAndLogIn
 import io.realm.kotlin.test.mongodb.use
+import io.realm.kotlin.test.platform.PlatformUtils
 import io.realm.kotlin.test.util.TestChannel
 import io.realm.kotlin.test.util.TestHelper
 import io.realm.kotlin.test.util.TestHelper.randomEmail
@@ -61,7 +61,6 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
-import kotlin.test.fail
 
 class AppTests {
 
@@ -121,7 +120,7 @@ class AppTests {
     @Suppress("LoopWithTooManyJumpStatements")
     @Test
     fun login_invalidCredentialsThrows() = runBlocking {
-        for (provider in AuthenticationProvider.values()) {
+        for (provider in AuthenticationProvider.entries) {
             when (provider) {
                 AuthenticationProvider.ANONYMOUS -> {
                     // No user input, so invalid credentials are not possible.
@@ -145,7 +144,7 @@ class AppTests {
                     null
                 }
             }?.let { credentials: Credentials ->
-                assertFailsWith<InvalidCredentialsException> {
+                assertFailsWith<AuthException> {
                     app.login(credentials)
                 }
             }
@@ -164,50 +163,52 @@ class AppTests {
     @Test
     fun allUsers() = runBlocking {
         assertEquals(0, app.allUsers().size)
+
         val user1 = app.login(Credentials.anonymous())
         var allUsers = app.allUsers()
         assertEquals(1, allUsers.size)
-        assertTrue(allUsers.containsKey(user1.identity))
-        assertEquals(user1, allUsers[user1.identity])
+        assertTrue(allUsers.contains(user1))
 
         // Only 1 anonymous user exists, so logging in again just returns the old one
         val user2 = app.login(Credentials.anonymous())
         allUsers = app.allUsers()
         assertEquals(1, allUsers.size)
-        assertTrue(allUsers.containsKey(user2.identity))
+        assertTrue(allUsers.contains(user2))
 
         val user3: User = app.asTestApp.createUserAndLogIn(TestHelper.randomEmail(), "123456")
         allUsers = app.allUsers()
         assertEquals(2, allUsers.size)
-        assertTrue(allUsers.containsKey(user3.identity))
+        assertTrue(allUsers.contains(user3))
 
         // Logging out users that registered with email/password will just put them in LOGGED_OUT state
         user3.logOut()
         allUsers = app.allUsers()
         assertEquals(2, allUsers.size)
-        assertTrue(allUsers.containsKey(user3.identity))
-        assertEquals(User.State.LOGGED_OUT, allUsers[user3.identity]!!.state)
+        assertTrue(allUsers.contains(user3))
+        assertEquals(User.State.LOGGED_OUT, user3.state)
 
         // Logging out anonymous users will remove them completely
         user1.logOut()
         allUsers = app.allUsers()
         assertEquals(1, allUsers.size)
-        assertFalse(allUsers.containsKey(user1.identity))
+        assertTrue(allUsers.contains(user3))
+        assertFalse(allUsers.contains(user2))
+        assertFalse(allUsers.contains(user1))
     }
 
     @Test
     fun allUsers_retrieveRemovedUser() = runBlocking {
         val user1: User = app.login(Credentials.anonymous())
-        val allUsers: Map<String, User> = app.allUsers()
+        val allUsers = app.allUsers()
         assertEquals(1, allUsers.size)
         user1.logOut()
         assertEquals(1, allUsers.size)
-        val userCopy: User = allUsers[user1.identity] ?: fail("Could not find user")
+        val userCopy: User = allUsers.first()
         assertEquals(user1, userCopy)
         assertEquals(User.State.REMOVED, userCopy.state)
         assertTrue(app.allUsers().isEmpty())
     }
-//
+
 //    @Test
 //    fun switchUser() {
 //        val user1: User = app.login(Credentials.anonymous())
@@ -375,6 +376,8 @@ class AppTests {
 
     @Test
     fun encryptedMetadataRealm() {
+        val tempDir = PlatformUtils.createTempDir()
+
         // Create new test app with a random encryption key
         val key = TestHelper.getRandomKey()
         TestApp(
@@ -383,7 +386,7 @@ class AppTests {
             builder = {
                 it
                     .encryptionKey(key)
-                    .syncRootDirectory("${appFilesDirectory()}/foo")
+                    .syncRootDirectory("$tempDir/foo")
             }
         ).use { app ->
             // Create Realm in order to create the sync metadata Realm
@@ -412,6 +415,8 @@ class AppTests {
 
     @Test
     fun encryptedMetadataRealm_openWithWrongKeyThrows() {
+        val tempDir = PlatformUtils.createTempDir()
+
         // Create new test app with a random encryption key
         val correctKey = TestHelper.getRandomKey()
         TestApp(
@@ -420,7 +425,7 @@ class AppTests {
             builder = {
                 it
                     .encryptionKey(correctKey)
-                    .syncRootDirectory("${appFilesDirectory()}/foo")
+                    .syncRootDirectory("$tempDir/foo")
             }
         ).use { app ->
             // Create Realm in order to create the sync metadata Realm
@@ -451,6 +456,8 @@ class AppTests {
 
     @Test
     fun encryptedMetadataRealm_openWithoutKeyThrows() {
+        val tempDir = PlatformUtils.createTempDir()
+
         // Create new test app with a random encryption key
         TestApp(
             "encryptedMetadataRealm_openWithoutKeyThrows",
@@ -458,7 +465,7 @@ class AppTests {
             builder = {
                 it
                     .encryptionKey(TestHelper.getRandomKey())
-                    .syncRootDirectory("${appFilesDirectory()}/foo")
+                    .syncRootDirectory("$tempDir/foo")
             }
         ).use { app ->
             // Create Realm in order to create the sync metadata Realm
@@ -523,7 +530,7 @@ class AppTests {
         ).use { testApp ->
             assertEquals(SyncServerConfig.url, testApp.baseUrl)
 
-            RealmLog.level = LogLevel.ALL
+            RealmLog.setLevel(LogLevel.ALL)
             runBlocking {
                 testApp.updateBaseUrl(null)
             }

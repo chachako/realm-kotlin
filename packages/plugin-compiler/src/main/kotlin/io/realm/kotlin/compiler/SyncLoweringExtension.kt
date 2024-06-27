@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+@file:OptIn(UnsafeDuringIrConstructionAPI::class)
+
 package io.realm.kotlin.compiler
 
 import io.realm.kotlin.compiler.ClassIds.APP_CONFIGURATION_BUILDER
@@ -35,6 +37,7 @@ import org.jetbrains.kotlin.ir.expressions.impl.IrCallImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrConstImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrGetObjectValueImpl
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
+import org.jetbrains.kotlin.ir.symbols.UnsafeDuringIrConstructionAPI
 import org.jetbrains.kotlin.ir.types.impl.IrSimpleTypeImpl
 import org.jetbrains.kotlin.ir.util.companionObject
 import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
@@ -104,10 +107,10 @@ private class SyncLowering(private val pluginContext: IrPluginContext, private v
         appCreateAppId.symbol to (
             appCreateAppIdBundleId to { expression: IrCall ->
                 IrGetObjectValueImpl(
-                    expression.startOffset,
-                    expression.endOffset,
-                    IrSimpleTypeImpl(appImplCompanionSymbol, false, emptyList(), emptyList()),
-                    appImplCompanionSymbol
+                    startOffset = expression.startOffset,
+                    endOffset = expression.endOffset,
+                    type = IrSimpleTypeImpl(appImplCompanionSymbol, false, emptyList(), emptyList()),
+                    symbol = appImplCompanionSymbol
                 )
             }
             ),

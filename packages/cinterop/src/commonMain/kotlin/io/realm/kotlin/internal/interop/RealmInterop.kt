@@ -617,6 +617,12 @@ expect object RealmInterop {
 
     fun realm_set_log_level(level: CoreLogLevel)
 
+    fun realm_set_log_level_category(category: String, level: CoreLogLevel)
+
+    fun realm_get_log_level_category(category: String): CoreLogLevel
+
+    fun realm_get_category_names(): List<String>
+
     fun realm_app_config_set_metadata_mode(
         appConfig: RealmAppConfigurationPointer,
         metadataMode: MetadataMode
@@ -766,6 +772,7 @@ expect object RealmInterop {
         app: RealmAppPointer,
         user: RealmUserPointer,
         name: String,
+        serviceName: String? = null,
         serializedEjsonArgs: String, // as ejson
         callback: AppCallback<String>
     )
@@ -826,7 +833,7 @@ expect object RealmInterop {
     ): Boolean
     // Returns a Pair of (<subscriptionPtr>, <true if inserted, false if updated>)
     fun realm_sync_subscriptionset_insert_or_assign(
-        mutatableSubscriptionSet: RealmMutableSubscriptionSetPointer,
+        mutableSubscriptionSet: RealmMutableSubscriptionSetPointer,
         query: RealmQueryPointer,
         name: String?
     ): Pair<RealmSubscriptionPointer, Boolean>

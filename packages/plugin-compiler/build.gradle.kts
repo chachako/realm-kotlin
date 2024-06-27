@@ -23,18 +23,22 @@ plugins {
 val mavenPublicationName = "compilerPlugin"
 
 dependencies {
+    kapt("org.jetbrains.kotlin:kotlin-compiler-embeddable:${Versions.kotlin}")
+    annotationProcessor("org.jetbrains.kotlin:kotlin-compiler-embeddable:${Versions.kotlin}")
     compileOnly("org.jetbrains.kotlin:kotlin-compiler-embeddable:${Versions.kotlin}")
     // Added to prevent warnings about inconsistent versions
     // w: Runtime JAR files in the classpath should have the same version. These files were found in the classpath:
     // w: Consider providing an explicit dependency on kotlin-reflect 1.4 to prevent strange errors
     implementation(kotlin("reflect"))
+    kapt(Deps.autoService)
+    annotationProcessor(Deps.autoService)
     compileOnly(Deps.autoService)
     kapt(Deps.autoServiceAnnotation)
 
     testImplementation("org.jetbrains.kotlin:kotlin-compiler-embeddable:${Versions.kotlin}")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit:${Versions.kotlin}")
     testImplementation("org.jetbrains.kotlin:kotlin-reflect:${Versions.kotlin}")
-    testImplementation("com.github.tschuchortdev:kotlin-compile-testing:${Versions.kotlinCompileTesting}")
+    testImplementation("dev.zacsweers.kctfork:core:${Versions.kotlinCompileTesting}")
     // Have to be mentioned explicitly as it is not an api dependency of library
     implementation(project(":cinterop"))
     testImplementation(project(":library-base"))
@@ -42,9 +46,7 @@ dependencies {
 }
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
-    kotlinOptions {
-        freeCompilerArgs = listOf("-Xjvm-default=all-compatibility")
-    }
+    compilerOptions.freeCompilerArgs.add("-Xjvm-default=all-compatibility")
 }
 
 realmPublish {

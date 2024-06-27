@@ -24,12 +24,11 @@ import android.net.ConnectivityManager
 import android.net.ConnectivityManager.NetworkCallback
 import android.net.Network
 import android.net.NetworkCapabilities
-import android.net.NetworkInfo
 import android.net.NetworkRequest
 import android.os.Build
 import androidx.startup.Initializer
+import io.realm.kotlin.internal.ContextLogger
 import io.realm.kotlin.internal.RealmInitializer
-import io.realm.kotlin.log.RealmLog
 
 /**
  * An **initializer** for Sync specific functionality that does not fit into the `RealmInitializer`
@@ -38,10 +37,12 @@ import io.realm.kotlin.log.RealmLog
 internal class RealmSyncInitializer : Initializer<Context> {
 
     companion object {
+        val logger: ContextLogger = ContextLogger("RealmSyncInitializer")
+
         @Suppress("DEPRECATION") // Should only be called below API 21
         fun isConnected(cm: ConnectivityManager?): Boolean {
             return cm?.let {
-                val networkInfo: NetworkInfo? = cm.activeNetworkInfo
+                val networkInfo: android.net.NetworkInfo? = cm.activeNetworkInfo
                 networkInfo != null && networkInfo.isConnectedOrConnecting || isEmulator()
             } ?: true
         }
@@ -85,7 +86,7 @@ internal class RealmSyncInitializer : Initializer<Context> {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M /* 23 */) {
                         request.addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
                     }
-                    RealmLog.info("Register ConnectivityManager network callbacks")
+                    logger.info("Register ConnectivityManager network callbacks")
                     connectivityManager?.registerNetworkCallback(
                         request.build(),
                         object : NetworkCallback() {
@@ -99,7 +100,7 @@ internal class RealmSyncInitializer : Initializer<Context> {
                         }
                     )
                 } else {
-                    RealmLog.info("Register BroadcastReceiver connectivity callbacks")
+                    logger.info("Register BroadcastReceiver connectivity callbacks")
                     @Suppress("DEPRECATION")
                     context.registerReceiver(
                         object : BroadcastReceiver() {
@@ -112,10 +113,10 @@ internal class RealmSyncInitializer : Initializer<Context> {
                     )
                 }
             } catch (ex: Exception) {
-                RealmLog.warn("Something went wrong trying to register a network state listener: $ex")
+                logger.warn("Something went wrong trying to register a network state listener: $ex")
             }
         } else {
-            RealmLog.warn(
+            logger.warn(
                 "It was not possible to register a network state listener. " +
                     "ACCESS_NETWORK_STATE was not granted."
             )

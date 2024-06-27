@@ -17,6 +17,7 @@
 package io.realm.kotlin.internal.interop
 
 import io.realm.kotlin.internal.interop.sync.AppError
+import io.realm.kotlin.internal.interop.sync.CoreConnectionState
 import io.realm.kotlin.internal.interop.sync.CoreSubscriptionSetState
 import io.realm.kotlin.internal.interop.sync.SyncError
 
@@ -43,7 +44,7 @@ interface SyncSessionTransferCompletionCallback {
 
 interface LogCallback {
     // Passes core log levels as shorts to avoid unnecessary jumping between the SDK and JNI
-    fun log(logLevel: Short, category: String?, message: String?)
+    fun log(logLevel: Short, categoryValue: String, message: String?)
 }
 
 interface SyncBeforeClientResetHandler {
@@ -85,11 +86,11 @@ fun interface AsyncOpenCallback {
 }
 
 fun interface ProgressCallback {
-    fun onChange(transferredBytes: Long, totalBytes: Long)
+    fun onChange(progressEstimate: Double)
 }
 
 fun interface ConnectionStateChangeCallback {
-    fun onChange(oldState: Int, newState: Int)
+    fun onChange(oldState: CoreConnectionState, newState: CoreConnectionState)
 }
 
 interface SyncThreadObserver {

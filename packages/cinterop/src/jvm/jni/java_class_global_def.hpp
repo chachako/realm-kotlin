@@ -45,6 +45,7 @@ private:
     JavaClassGlobalDef(JNIEnv* env)
         : m_java_util_hashmap(env, "java/util/HashMap", false)
         , m_java_lang_int(env, "java/lang/Integer", false)
+        , m_java_lang_string(env, "java/lang/String", false)
         , m_kotlin_jvm_functions_function0(env, "kotlin/jvm/functions/Function0", false)
         , m_kotlin_jvm_functions_function1(env, "kotlin/jvm/functions/Function1", false)
         , m_io_realm_kotlin_internal_interop_sync_network_transport(env, "io/realm/kotlin/internal/interop/sync/NetworkTransport", false)
@@ -69,11 +70,14 @@ private:
         , m_io_realm_kotlin_internal_interop_sync_websocket_transport(env, "io/realm/kotlin/internal/interop/sync/WebSocketTransport", false)
         , m_io_realm_kotlin_internal_interop_sync_websocket_client(env, "io/realm/kotlin/internal/interop/sync/WebSocketClient", false)
         , m_io_realm_kotlin_internal_interop_notification_callback(env, "io/realm/kotlin/internal/interop/NotificationCallback", false)
+        , m_io_realm_kotlin_internal_interop_sync_connection_state(env, "io/realm/kotlin/internal/interop/sync/CoreConnectionState", false)
+
     {
     }
 
     jni_util::JavaClass m_java_util_hashmap;
     jni_util::JavaClass m_java_lang_int;
+    jni_util::JavaClass m_java_lang_string;
     jni_util::JavaClass m_kotlin_jvm_functions_function0;
     jni_util::JavaClass m_kotlin_jvm_functions_function1;
     jni_util::JavaClass m_io_realm_kotlin_internal_interop_sync_network_transport;
@@ -98,6 +102,7 @@ private:
     jni_util::JavaClass m_io_realm_kotlin_internal_interop_sync_websocket_transport;
     jni_util::JavaClass m_io_realm_kotlin_internal_interop_sync_websocket_client;
     jni_util::JavaClass m_io_realm_kotlin_internal_interop_notification_callback;
+    jni_util::JavaClass m_io_realm_kotlin_internal_interop_sync_connection_state;
 
     inline static std::unique_ptr<JavaClassGlobalDef>& instance()
     {
@@ -133,6 +138,11 @@ public:
         return env->NewObject(instance()->m_java_lang_int, init, value);
     }
 
+    inline static const jni_util::JavaClass& java_lang_string()
+    {
+        return instance()->m_java_lang_string;
+    }
+
     inline static const jni_util::JavaClass& network_transport_class()
     {
         return instance()->m_io_realm_kotlin_internal_interop_sync_network_transport;
@@ -161,6 +171,11 @@ public:
     inline static const jni_util::JavaClass& app_error()
     {
         return instance()->m_io_realm_kotlin_internal_interop_sync_app_error;
+    }
+
+    inline static const jni_util::JavaClass& connection_state()
+    {
+        return instance()->m_io_realm_kotlin_internal_interop_sync_connection_state;
     }
 
     inline static const jni_util::JavaClass& log_callback()

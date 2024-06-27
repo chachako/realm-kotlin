@@ -13,13 +13,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+@file:Suppress("invisible_member", "invisible_reference")
 
 package io.realm.kotlin.test.mongodb.common
 
-import io.realm.kotlin.LogConfiguration
 import io.realm.kotlin.Realm
 import io.realm.kotlin.RealmConfiguration
 import io.realm.kotlin.VersionId
+import io.realm.kotlin.entities.JsonStyleRealmObject
 import io.realm.kotlin.entities.sync.BinaryObject
 import io.realm.kotlin.entities.sync.ChildPk
 import io.realm.kotlin.entities.sync.ParentPk
@@ -27,16 +28,24 @@ import io.realm.kotlin.entities.sync.SyncObjectWithAllTypes
 import io.realm.kotlin.entities.sync.flx.FlexChildObject
 import io.realm.kotlin.entities.sync.flx.FlexEmbeddedObject
 import io.realm.kotlin.entities.sync.flx.FlexParentObject
+import io.realm.kotlin.ext.asFlow
+import io.realm.kotlin.ext.asRealmObject
 import io.realm.kotlin.ext.query
+import io.realm.kotlin.ext.realmAnyDictionaryOf
+import io.realm.kotlin.ext.realmAnyListOf
+import io.realm.kotlin.internal.interop.ErrorCode
+import io.realm.kotlin.internal.interop.RealmInterop
 import io.realm.kotlin.internal.platform.fileExists
 import io.realm.kotlin.internal.platform.pathOf
 import io.realm.kotlin.internal.platform.runBlocking
-import io.realm.kotlin.log.LogLevel
+import io.realm.kotlin.log.RealmLog
 import io.realm.kotlin.mongodb.App
+import io.realm.kotlin.mongodb.Credentials
 import io.realm.kotlin.mongodb.User
 import io.realm.kotlin.mongodb.exceptions.DownloadingRealmTimeOutException
 import io.realm.kotlin.mongodb.exceptions.SyncException
 import io.realm.kotlin.mongodb.exceptions.UnrecoverableSyncException
+import io.realm.kotlin.mongodb.internal.SyncSessionImpl
 import io.realm.kotlin.mongodb.subscriptions
 import io.realm.kotlin.mongodb.sync.InitialSubscriptionsCallback
 import io.realm.kotlin.mongodb.sync.SubscriptionSetState
@@ -52,9 +61,9 @@ import io.realm.kotlin.query.RealmResults
 import io.realm.kotlin.schema.RealmClass
 import io.realm.kotlin.schema.RealmSchema
 import io.realm.kotlin.schema.ValuePropertyType
+import io.realm.kotlin.test.mongodb.TEST_APP_FLEX
 import io.realm.kotlin.test.mongodb.TestApp
 import io.realm.kotlin.test.mongodb.asTestApp
-import io.realm.kotlin.test.mongodb.common.utils.CustomLogCollector
 import io.realm.kotlin.test.mongodb.common.utils.assertFailsWithMessage
 import io.realm.kotlin.test.mongodb.common.utils.uploadAllLocalChangesOrFail
 import io.realm.kotlin.test.mongodb.createUserAndLogIn
@@ -67,6 +76,9 @@ import io.realm.kotlin.test.util.receiveOrFail
 import io.realm.kotlin.test.util.trySendOrFail
 import io.realm.kotlin.test.util.use
 import io.realm.kotlin.types.BaseRealmObject
+import io.realm.kotlin.types.RealmAny
+import io.realm.kotlin.types.RealmDictionary
+import io.realm.kotlin.types.RealmList
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -139,6 +151,8 @@ class SyncedRealmTests {
         if (this::app.isInitialized) {
             app.asTestApp.close()
         }
+
+        RealmLog.reset()
     }
 
     @Test
@@ -313,6 +327,56 @@ class SyncedRealmTests {
     }
 
     @Test
+    fun errorHandlerProcessFatalSyncErrors() {
+        val channel = TestChannel<Throwable>()
+        val user = runBlocking {
+            app.login(Credentials.anonymous())
+        }
+
+        val config = SyncConfiguration.Builder(
+            schema = setOf(ParentPk::class, ChildPk::class),
+            user = user,
+            partitionValue = partitionValue
+        ).errorHandler { _, error ->
+            channel.trySendOrFail(error)
+        }.build()
+
+        runBlocking {
+            val deferred = async {
+                Realm.open(config).use { realm ->
+                    RealmInterop.realm_sync_session_handle_error_for_testing(
+                        syncSession = (realm.syncSession as SyncSessionImpl).nativePointer,
+                        error = ErrorCode.RLM_ERR_ACCOUNT_NAME_IN_USE,
+                        errorMessage = "Non fatal error",
+                        isFatal = true, // flipped https://jira.mongodb.org/browse/RCORE-2146
+                    )
+
+                    RealmInterop.realm_sync_session_handle_error_for_testing(
+                        syncSession = (realm.syncSession as SyncSessionImpl).nativePointer,
+                        error = ErrorCode.RLM_ERR_INTERNAL_SERVER_ERROR,
+                        errorMessage = "Fatal error",
+                        isFatal = false, // flipped https://jira.mongodb.org/browse/RCORE-2146
+                    )
+                }
+            }
+
+            // First error
+            channel.receiveOrFail().let { error ->
+                assertNotNull(error.message)
+                assertIs<SyncException>(error)
+            }
+
+            // Second
+            channel.receiveOrFail().let { error ->
+                assertNotNull(error.message)
+                assertIs<UnrecoverableSyncException>(error)
+            }
+
+            deferred.cancel()
+        }
+    }
+
+    @Test
     fun errorHandlerReceivesPermissionDeniedSyncError() {
         val channel = TestChannel<Throwable>()
         // Remove permissions to generate a sync error containing ONLY the original path
@@ -335,15 +399,15 @@ class SyncedRealmTests {
                 Realm.open(config).use {
                     // Make sure that the test eventually fail. Coroutines can cancel a delay
                     // so this doesn't always block the test for 10 seconds.
-                    delay(10 * 1000)
+                    delay(10_000)
                     channel.send(AssertionError("Realm was successfully opened"))
                 }
             }
 
             val error = channel.receiveOrFail()
-            assertTrue(error is UnrecoverableSyncException, "Was $error")
             val message = error.message
             assertNotNull(message)
+            assertTrue(error is UnrecoverableSyncException, "Was $error")
             assertTrue(
                 message.lowercase().contains("permission denied"),
                 "The error should be 'PermissionDenied' but it was: $message"
@@ -648,6 +712,213 @@ class SyncedRealmTests {
                         }.list
                 assertEquals(1, list.size)
                 assertTrue(SyncObjectWithAllTypes.compareAgainstSampleData(list.first()))
+            }
+        }
+    }
+
+    @Test
+    fun roundtripCollectionsInMixed() = runBlocking {
+        val (email1, password1) = randomEmail() to "password1234"
+        val (email2, password2) = randomEmail() to "password1234"
+        val app = TestApp(this::class.simpleName, appName = TEST_APP_FLEX)
+        val user1 = app.createUserAndLogIn(email1, password1)
+        val user2 = app.createUserAndLogIn(email2, password2)
+
+        // Create object with all types
+        val selector = ObjectId().toString()
+
+        createFlexibleSyncConfig(
+            user = user1,
+            initialSubscriptions = { realm ->
+                realm.query<JsonStyleRealmObject>("selector = $0", selector).subscribe()
+            }
+        ).let { config ->
+            Realm.open(config).use { realm ->
+                realm.write {
+                    val child = (
+                        JsonStyleRealmObject().apply {
+                            this.id = "CHILD"
+                            this.selector = selector
+                        }
+                        )
+
+                    copyToRealm(
+                        JsonStyleRealmObject().apply {
+                            this.id = "PARENT"
+                            this.selector = selector
+                            value = realmAnyDictionaryOf(
+                                "primitive" to 1,
+                                // List with nested dictionary
+                                "list" to realmAnyListOf(1, "Realm", child, realmAnyDictionaryOf("listkey1" to 1, "listkey2" to "Realm", "listkey3" to child)),
+                                "dictionary" to realmAnyDictionaryOf("dictkey1" to 1, "dictkey2" to "Realm", "dictkey3" to child, "dictkey4" to realmAnyListOf(1, 2, 3))
+                            )
+                        }
+                    )
+                }
+                realm.syncSession.uploadAllLocalChangesOrFail()
+            }
+        }
+        createFlexibleSyncConfig(
+            user = user2,
+            initialSubscriptions = { realm ->
+                realm.query<JsonStyleRealmObject>("selector = $0", selector).subscribe()
+            }
+        ).let { config ->
+            Realm.open(config).use { realm ->
+                realm.syncSession.downloadAllServerChanges(10.seconds)
+                val flow = realm.query<JsonStyleRealmObject>("_id = $0", "PARENT").asFlow()
+                val parent = withTimeout(10.seconds) {
+                    flow.first {
+                        it.list.size >= 1
+                    }.list[0]
+                }
+                parent.let {
+                    val value = it.value!!.asDictionary()
+                    assertEquals(RealmAny.Companion.create(1), value["primitive"])
+                    value["list"]!!.asList().let {
+                        assertEquals(1, it[0]!!.asInt())
+                        assertEquals("Realm", it[1]!!.asString())
+                        assertEquals("CHILD", it[2]!!.asRealmObject<JsonStyleRealmObject>().id)
+                        it[3]!!.asDictionary().let { dict ->
+                            assertEquals(1, dict["listkey1"]!!.asInt())
+                            assertEquals("Realm", dict["listkey2"]!!.asString())
+                            assertEquals("CHILD", dict["listkey3"]!!.asRealmObject<JsonStyleRealmObject>().id)
+                        }
+                        assertEquals("CHILD", it[2]!!.asRealmObject<JsonStyleRealmObject>().id)
+                    }
+                    value["dictionary"]!!.asDictionary().let {
+                        assertEquals(1, it["dictkey1"]!!.asInt())
+                        assertEquals("Realm", it["dictkey2"]!!.asString())
+                        assertEquals("CHILD", it["dictkey3"]!!.asRealmObject<JsonStyleRealmObject>().id)
+                        it["dictkey4"]!!.asList().let {
+                            assertEquals(realmAnyListOf(1, 2, 3).asList(), it)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun collectionsInMixed_asFlow() = runBlocking {
+        val (email1, password1) = randomEmail() to "password1234"
+        val (email2, password2) = randomEmail() to "password1234"
+        val app = TestApp(this::class.simpleName, appName = TEST_APP_FLEX)
+        val user1 = app.createUserAndLogIn(email1, password1)
+        val user2 = app.createUserAndLogIn(email2, password2)
+
+        // Create object with all types
+        val selector = ObjectId().toString()
+
+        val updateChannel = TestChannel<JsonStyleRealmObject>()
+
+        val configWriter = createFlexibleSyncConfig(
+            user = user1,
+            initialSubscriptions = { realm ->
+                realm.query<JsonStyleRealmObject>("selector = $0", selector).subscribe()
+            }
+        )
+        val configReader = createFlexibleSyncConfig(
+            user = user2,
+            initialSubscriptions = { realm ->
+                realm.query<JsonStyleRealmObject>("selector = $0", selector).subscribe()
+            },
+        ) {
+            this.waitForInitialRemoteData(10.seconds)
+        }
+        Realm.open(configWriter).use { writerRealm ->
+            val source = writerRealm.write {
+                copyToRealm(
+                    JsonStyleRealmObject().apply {
+                        this.selector = selector
+                        value = realmAnyDictionaryOf(
+                            // List with nested dictionary
+                            "list" to realmAnyListOf(
+                                1,
+                                "Realm",
+                                realmAnyDictionaryOf("listkey1" to 1)
+                            ),
+                            // Dictionary with nested list
+                            "dictionary" to realmAnyDictionaryOf(
+                                "dictkey1" to 1,
+                                "dictkey2" to "Realm",
+                                "dictkey3" to realmAnyListOf(1, 2, 3)
+                            )
+                        )
+                    }
+                )
+            }
+            writerRealm.syncSession.uploadAllLocalChangesOrFail()
+
+            Realm.open(configReader).use { readerRealm ->
+                val reader = readerRealm.query<JsonStyleRealmObject>("selector = $0", selector).find().single()
+                val listener = async {
+                    reader.asFlow().collect {
+                        updateChannel.trySendOrFail(it.obj!!)
+                    }
+                }
+                // Flush initial event from channel
+                updateChannel.receiveOrFail()
+
+                // List add
+                writerRealm.write {
+                    findLatest(source)!!.run {
+                        value!!.asDictionary()["list"]!!.asList().add(RealmAny.Companion.create(6))
+                    }
+                }
+                updateChannel.receiveOrFail().run {
+                    val updatedList = value!!.asDictionary()["list"]!!.asList()
+                    assertEquals(4, updatedList.size)
+                    assertEquals(1, updatedList[0]!!.asInt())
+                    assertEquals("Realm", updatedList[1]!!.asString())
+                    assertIs<RealmDictionary<RealmAny>>(updatedList[2]!!.asDictionary())
+                    assertEquals(6, updatedList[3]!!.asInt())
+                }
+
+                // List removal
+                writerRealm.write {
+                    findLatest(source)!!.run {
+                        value!!.asDictionary()["list"]!!.asList().removeAt(1)
+                    }
+                }
+                updateChannel.receiveOrFail().run {
+                    val updatedList = value!!.asDictionary()["list"]!!.asList()
+                    assertEquals(3, updatedList.size)
+                    assertEquals(1, updatedList[0]!!.asInt())
+                    assertIs<RealmDictionary<RealmAny>>(updatedList[1]!!.asDictionary())
+                    assertEquals(6, updatedList[2]!!.asInt())
+                }
+
+                // Dictionary add
+                writerRealm.write {
+                    findLatest(source)!!.run {
+                        value!!.asDictionary()["dictionary"]!!.asDictionary()["dictkey4"] = RealmAny.Companion.create(6)
+                    }
+                }
+                updateChannel.receiveOrFail().run {
+                    val updatedDictionary = value!!.asDictionary()["dictionary"]!!.asDictionary()
+                    assertEquals(4, updatedDictionary.size)
+                    assertEquals(1, updatedDictionary["dictkey1"]!!.asInt())
+                    assertEquals("Realm", updatedDictionary["dictkey2"]!!.asString())
+                    assertIs<RealmList<RealmAny>>(updatedDictionary["dictkey3"]!!.asList())
+                    assertEquals(6, updatedDictionary["dictkey4"]!!.asInt())
+                }
+
+                // Dictionary removal
+                writerRealm.write {
+                    findLatest(source)!!.run {
+                        value!!.asDictionary()["dictionary"]!!.asDictionary().remove("dictkey3")
+                    }
+                }
+                updateChannel.receiveOrFail().run {
+                    val updatedDictionary = value!!.asDictionary()["dictionary"]!!.asDictionary()
+                    assertEquals(3, updatedDictionary.size)
+                    assertEquals(1, updatedDictionary["dictkey1"]!!.asInt())
+                    assertEquals("Realm", updatedDictionary["dictkey2"]!!.asString())
+                    assertEquals(6, updatedDictionary["dictkey4"]!!.asInt())
+                }
+
+                listener.cancel()
             }
         }
     }
@@ -1069,7 +1340,6 @@ class SyncedRealmTests {
     fun writeCopyTo_flexibleSyncToFlexibleSync() = runBlocking {
         TestApp(
             "writeCopyTo_flexibleSyncToFlexibleSync",
-            logLevel = io.realm.kotlin.log.LogLevel.ALL,
             appName = io.realm.kotlin.test.mongodb.TEST_APP_FLEX,
             builder = {
                 it.syncRootDirectory(PlatformUtils.createTempDir("flx-sync-"))
@@ -1238,44 +1508,6 @@ class SyncedRealmTests {
         }
     }
 
-    @Test
-    fun customLoggersReceiveSyncLogs() = runBlocking {
-        val customLogger = CustomLogCollector("CUSTOM", LogLevel.ALL)
-        val section = Random.nextInt()
-        TestApp(
-            "customLoggersReceiveSyncLogs",
-            appName = io.realm.kotlin.test.mongodb.TEST_APP_FLEX,
-            builder = {
-                it.syncRootDirectory(PlatformUtils.createTempDir("flx-sync-"))
-                it.log(level = LogLevel.ALL, listOf(customLogger))
-                it.appName("MyCustomApp")
-                it.appVersion("1.0.0")
-            }
-        ).use { flexApp ->
-            val (email, password) = randomEmail() to "password1234"
-            val user = flexApp.createUserAndLogIn(email, password)
-            val syncConfig = createFlexibleSyncConfig(
-                user = user,
-                name = "flex.realm",
-                initialSubscriptions = { realm: Realm ->
-                    realm.query<FlexParentObject>("section = $0", section).subscribe()
-                }
-            )
-            Realm.open(syncConfig).use { flexSyncRealm: Realm ->
-                flexSyncRealm.writeBlocking {
-                    copyToRealm(
-                        FlexParentObject().apply {
-                            name = "local object"
-                        }
-                    )
-                }
-                flexSyncRealm.syncSession.uploadAllLocalChangesOrFail()
-            }
-            assertTrue(customLogger.logs.isNotEmpty())
-            assertTrue(customLogger.logs.any { it.contains("Connection[1]: Negotiated protocol version:") }, "Missing Connection[1]")
-        }
-    }
-
     // This test verifies that the user facing Realm instance is actually advanced on an on-needed
     // basis even though there is no actual listener or explicit await download/upload calls.
     @Test
@@ -1402,7 +1634,6 @@ class SyncedRealmTests {
     fun createInitialRealmFx() = runBlocking {
         TestApp(
             "createInitialRealmFx",
-            logLevel = LogLevel.ALL,
             appName = io.realm.kotlin.test.mongodb.TEST_APP_FLEX,
             builder = {
                 it.syncRootDirectory(PlatformUtils.createTempDir("flx-sync-"))
@@ -1865,7 +2096,6 @@ class SyncedRealmTests {
         partitionValue: String,
         name: String = DEFAULT_NAME,
         encryptionKey: ByteArray? = null,
-        log: LogConfiguration? = null,
         errorHandler: ErrorHandler? = null,
         schema: Set<KClass<out BaseRealmObject>> = PARTITION_BASED_SCHEMA,
         block: SyncConfiguration.Builder.() -> Unit = {}
@@ -1876,7 +2106,6 @@ class SyncedRealmTests {
     ).name(name).also { builder ->
         if (encryptionKey != null) builder.encryptionKey(encryptionKey)
         if (errorHandler != null) builder.errorHandler(errorHandler)
-        if (log != null) builder.log(log.level, log.loggers)
         block(builder)
     }.build()
 
@@ -1885,7 +2114,6 @@ class SyncedRealmTests {
         user: User,
         name: String = DEFAULT_NAME,
         encryptionKey: ByteArray? = null,
-        log: LogConfiguration? = null,
         errorHandler: ErrorHandler? = null,
         schema: Set<KClass<out BaseRealmObject>> = FLEXIBLE_SYNC_SCHEMA,
         initialSubscriptions: InitialSubscriptionsCallback? = null,
@@ -1896,7 +2124,6 @@ class SyncedRealmTests {
     ).name(name).also { builder ->
         if (encryptionKey != null) builder.encryptionKey(encryptionKey)
         if (errorHandler != null) builder.errorHandler(errorHandler)
-        if (log != null) builder.log(log.level, log.loggers)
         if (initialSubscriptions != null) builder.initialSubscriptions(false, initialSubscriptions)
         block(builder)
     }.build()

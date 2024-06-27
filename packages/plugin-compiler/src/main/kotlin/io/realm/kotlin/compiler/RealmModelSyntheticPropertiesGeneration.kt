@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+@file:OptIn(UnsafeDuringIrConstructionAPI::class)
+
 package io.realm.kotlin.compiler
 
 import io.realm.kotlin.compiler.ClassIds.CLASS_INFO
@@ -33,7 +35,6 @@ import io.realm.kotlin.compiler.ClassIds.PROPERTY_TYPE
 import io.realm.kotlin.compiler.ClassIds.REALM_ANY
 import io.realm.kotlin.compiler.ClassIds.REALM_INSTANT
 import io.realm.kotlin.compiler.ClassIds.REALM_MODEL_COMPANION
-import io.realm.kotlin.compiler.ClassIds.REALM_OBJECT_ID
 import io.realm.kotlin.compiler.ClassIds.REALM_OBJECT_INTERFACE
 import io.realm.kotlin.compiler.ClassIds.REALM_OBJECT_INTERNAL_INTERFACE
 import io.realm.kotlin.compiler.ClassIds.REALM_UUID
@@ -91,12 +92,17 @@ import org.jetbrains.kotlin.ir.expressions.impl.IrConstructorCallImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrGetEnumValueImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrPropertyReferenceImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrVarargImpl
+import org.jetbrains.kotlin.ir.symbols.UnsafeDuringIrConstructionAPI
+import org.jetbrains.kotlin.ir.types.IrSimpleType
 import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.types.classFqName
+import org.jetbrains.kotlin.ir.types.classOrNull
+import org.jetbrains.kotlin.ir.types.defaultType
 import org.jetbrains.kotlin.ir.types.getClass
 import org.jetbrains.kotlin.ir.types.isNullable
 import org.jetbrains.kotlin.ir.types.makeNullable
 import org.jetbrains.kotlin.ir.types.starProjectedType
+import org.jetbrains.kotlin.ir.types.typeOrNull
 import org.jetbrains.kotlin.ir.types.typeWith
 import org.jetbrains.kotlin.ir.util.companionObject
 import org.jetbrains.kotlin.ir.util.constructors
@@ -145,7 +151,6 @@ class RealmModelSyntheticPropertiesGeneration(private val pluginContext: IrPlugi
 
     private val objectReferenceClass = pluginContext.lookupClassOrThrow(OBJECT_REFERENCE_CLASS)
     private val realmInstantType: IrType = pluginContext.lookupClassOrThrow(REALM_INSTANT).defaultType
-    private val realmObjectIdType: IrType = pluginContext.lookupClassOrThrow(REALM_OBJECT_ID).defaultType
     private val objectIdType: IrType = pluginContext.lookupClassOrThrow(KBSON_OBJECT_ID).defaultType
     private val realmUUIDType: IrType = pluginContext.lookupClassOrThrow(REALM_UUID).defaultType
     private val realmAnyType: IrType = pluginContext.lookupClassOrThrow(REALM_ANY).defaultType
@@ -167,6 +172,11 @@ class RealmModelSyntheticPropertiesGeneration(private val pluginContext: IrPlugi
         realmObjectInterface.defaultType,
         pluginContext.irBuiltIns.anyNType.makeNullable()
     )
+    // Pair<KClass<*>, KMutableProperty1<BaseRealmObject, Any?>>
+    private val fieldTypeAndProperty = pairClass.typeWith(
+        pluginContext.irBuiltIns.kClassClass.starProjectedType,
+        realmObjectMutablePropertyType
+    )
     private val mapOf = pluginContext.referenceFunctions(KOTLIN_COLLECTIONS_MAPOF)
         .first {
             val parameters = it.owner.valueParameters
@@ -174,16 +184,11 @@ class RealmModelSyntheticPropertiesGeneration(private val pluginContext: IrPlugi
         }
     private val companionFieldsType = mapClass.typeWith(
         pluginContext.irBuiltIns.stringType,
-        realmObjectMutablePropertyType
-    )
-    @Suppress("UnusedPrivateMember")
-    private val companionComputedFieldsType = mapClass.typeWith(
-        pluginContext.irBuiltIns.stringType,
-        realmObjectPropertyType
+        fieldTypeAndProperty,
     )
     private val companionFieldsElementType = pairClass.typeWith(
         pluginContext.irBuiltIns.stringType,
-        realmObjectMutablePropertyType
+        fieldTypeAndProperty
     )
 
     val realmClassImpl = pluginContext.lookupClassOrThrow(ClassIds.REALM_CLASS_IMPL)
@@ -200,7 +205,6 @@ class RealmModelSyntheticPropertiesGeneration(private val pluginContext: IrPlugi
             longType,
             stringType,
             objectIdType,
-            realmObjectIdType,
             realmUUIDType
         )
     }
@@ -215,7 +219,6 @@ class RealmModelSyntheticPropertiesGeneration(private val pluginContext: IrPlugi
             stringType,
             realmInstantType,
             objectIdType,
-            realmObjectIdType,
             realmUUIDType,
             realmAnyType
         )
@@ -250,7 +253,7 @@ class RealmModelSyntheticPropertiesGeneration(private val pluginContext: IrPlugi
      * - `public fun `io_realm_kotlin_schema`(): RealmClassImpl` is added by calling [addSchemaMethodBody].
      * - `public fun `io_realm_kotlin_newInstance`(): Any` is added by calling [addNewInstanceMethodBody].
      */
-    @Suppress("LongMethod")
+    @Suppress("LongMethod", "ComplexMethod")
     fun addCompanionFields(
         clazz: IrClass,
         companion: IrClass,
@@ -288,7 +291,7 @@ class RealmModelSyntheticPropertiesGeneration(private val pluginContext: IrPlugi
             IrConstImpl.string(startOffset, endOffset, pluginContext.irBuiltIns.stringType, className)
         }
 
-        // Add `public val `io_realm_kotlin_fields`: Map<String, KProperty1<BaseRealmObject, Any?>>` property.
+        // Add `public val `io_realm_kotlin_fields`: Map<String, Pair<KClass<*>, KProperty1<BaseRealmObject, Any?>>>` property.
         companion.addValueProperty(
             pluginContext,
             realmObjectCompanionInterface,
@@ -305,7 +308,7 @@ class RealmModelSyntheticPropertiesGeneration(private val pluginContext: IrPlugi
                 superQualifierSymbol = null
             ).apply {
                 putTypeArgument(index = 0, type = pluginContext.irBuiltIns.stringType)
-                putTypeArgument(index = 1, type = realmObjectPropertyType)
+                putTypeArgument(index = 1, type = fieldTypeAndProperty)
                 putValueArgument(
                     index = 0,
                     valueArgument = IrVarargImpl(
@@ -313,20 +316,35 @@ class RealmModelSyntheticPropertiesGeneration(private val pluginContext: IrPlugi
                         UNDEFINED_OFFSET,
                         pluginContext.irBuiltIns.arrayClass.typeWith(companionFieldsElementType),
                         type,
-                        // Generate list of properties: List<Pair<String, KMutableProperty1<*, *>>>
+                        // Generate list of properties: List<Pair<String, Pair<KClass<*>, KMutableProperty1<*, *>>>>
                         properties!!.entries.map {
                             val property = it.value.declaration
-                            val propertyType = if (it.value.isComputed) realmObjectPropertyType else
+                            val targetType: IrType = property.backingField!!.type
+                            val propertyElementType: IrType = when (it.value.collectionType) {
+                                CollectionType.NONE -> targetType
+                                CollectionType.LIST -> (targetType as IrSimpleType).arguments[0].typeOrNull!!
+                                CollectionType.SET -> (targetType as IrSimpleType).arguments[0].typeOrNull!!
+                                CollectionType.DICTIONARY -> (targetType as IrSimpleType).arguments[0].typeOrNull!!
+                            }
+                            val elementKClassRef = IrClassReferenceImpl(
+                                startOffset = startOffset,
+                                endOffset = endOffset,
+                                type = pluginContext.irBuiltIns.kClassClass.typeWith(propertyElementType),
+                                symbol = propertyElementType.classOrNull!!,
+                                classType = propertyElementType.classOrNull!!.defaultType,
+                            )
+                            val objectPropertyType = if (it.value.isComputed) realmObjectPropertyType else
                                 realmObjectMutablePropertyType
-                            // Pair<String, KMutableProperty1<*, *>>()
+                            val elementType = pairClass.typeWith(pluginContext.irBuiltIns.kClassClass.typeWith(), objectPropertyType)
+                            // Pair<String, Pair<String, KMutableProperty1<*, *>>>()
                             IrConstructorCallImpl.fromSymbolOwner(
                                 startOffset = startOffset,
                                 endOffset = endOffset,
-                                type = companionFieldsElementType,
+                                type = elementType,
                                 constructorSymbol = pairCtor
                             ).apply {
                                 putTypeArgument(0, pluginContext.irBuiltIns.stringType)
-                                putTypeArgument(1, propertyType)
+                                putTypeArgument(1, elementType)
                                 putValueArgument(
                                     0,
                                     IrConstImpl.string(
@@ -338,16 +356,35 @@ class RealmModelSyntheticPropertiesGeneration(private val pluginContext: IrPlugi
                                 )
                                 putValueArgument(
                                     1,
-                                    IrPropertyReferenceImpl(
+                                    IrConstructorCallImpl.fromSymbolOwner(
                                         startOffset = startOffset,
                                         endOffset = endOffset,
-                                        type = kPropertyType,
-                                        symbol = property.symbol,
-                                        typeArgumentsCount = 0,
-                                        field = null,
-                                        getter = property.getter?.symbol,
-                                        setter = property.setter?.symbol
-                                    )
+                                        type = elementType,
+                                        constructorSymbol = pairCtor
+                                    ).apply {
+                                        putTypeArgument(
+                                            0,
+                                            pluginContext.irBuiltIns.kClassClass.starProjectedType
+                                        )
+                                        putTypeArgument(1, objectPropertyType)
+                                        putValueArgument(
+                                            0,
+                                            elementKClassRef
+                                        )
+                                        putValueArgument(
+                                            1,
+                                            IrPropertyReferenceImpl(
+                                                startOffset = startOffset,
+                                                endOffset = endOffset,
+                                                type = kPropertyType,
+                                                symbol = property.symbol,
+                                                typeArgumentsCount = 0,
+                                                field = null,
+                                                getter = property.getter?.symbol,
+                                                setter = property.setter?.symbol
+                                            )
+                                        )
+                                    }
                                 )
                             }
                         }

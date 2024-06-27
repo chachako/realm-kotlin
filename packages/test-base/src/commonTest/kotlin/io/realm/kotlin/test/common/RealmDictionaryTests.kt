@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+@file:Suppress("unchecked_cast")
 
 package io.realm.kotlin.test.common
 
@@ -34,7 +35,6 @@ import io.realm.kotlin.test.common.utils.GenericTypeSafetyManager
 import io.realm.kotlin.test.common.utils.assertFailsWithMessage
 import io.realm.kotlin.test.platform.PlatformUtils
 import io.realm.kotlin.test.util.TypeDescriptor
-import io.realm.kotlin.types.ObjectId
 import io.realm.kotlin.types.RealmAny
 import io.realm.kotlin.types.RealmDictionary
 import io.realm.kotlin.types.RealmDictionaryEntrySet
@@ -1417,11 +1417,6 @@ fun <T> getDataSetForDictionaryClassifier(
         NULLABLE_TIMESTAMP_VALUES.mapIndexed { i, value -> Pair(DICTIONARY_KEYS_FOR_NULLABLE[i], value) }
     } else {
         TIMESTAMP_VALUES.mapIndexed { i, value -> Pair(DICTIONARY_KEYS[i], value) }
-    }
-    ObjectId::class -> if (nullable) {
-        NULLABLE_OBJECT_ID_VALUES.mapIndexed { i, value -> Pair(DICTIONARY_KEYS_FOR_NULLABLE[i], value) }
-    } else {
-        OBJECT_ID_VALUES.mapIndexed { i, value -> Pair(DICTIONARY_KEYS[i], value) }
     }
     BsonObjectId::class -> if (nullable) {
         NULLABLE_BSON_OBJECT_ID_VALUES.mapIndexed { i, value ->

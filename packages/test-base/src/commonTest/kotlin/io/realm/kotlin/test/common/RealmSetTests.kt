@@ -34,7 +34,6 @@ import io.realm.kotlin.test.common.utils.GenericTypeSafetyManager
 import io.realm.kotlin.test.common.utils.assertFailsWithMessage
 import io.realm.kotlin.test.platform.PlatformUtils
 import io.realm.kotlin.test.util.TypeDescriptor
-import io.realm.kotlin.types.ObjectId
 import io.realm.kotlin.types.RealmAny
 import io.realm.kotlin.types.RealmInstant
 import io.realm.kotlin.types.RealmObject
@@ -73,6 +72,7 @@ class RealmSetTests : CollectionQueryTests {
     private lateinit var tmpDir: String
     private lateinit var realm: Realm
 
+    @Suppress("UNCHECKED_CAST")
     private val managedTesters: List<SetApiTester<*, RealmSetContainer>> by lazy {
         descriptors.map {
             val elementType = it.elementType
@@ -692,7 +692,6 @@ fun <T> getDataSetForCollectionClassifier(
     Decimal128::class -> if (nullable) NULLABLE_DECIMAL128_VALUES else DECIMAL128_VALUES
     String::class -> if (nullable) NULLABLE_STRING_VALUES else STRING_VALUES
     RealmInstant::class -> if (nullable) NULLABLE_TIMESTAMP_VALUES else TIMESTAMP_VALUES
-    ObjectId::class -> if (nullable) NULLABLE_OBJECT_ID_VALUES else OBJECT_ID_VALUES
     BsonObjectId::class -> if (nullable) NULLABLE_BSON_OBJECT_ID_VALUES else BSON_OBJECT_ID_VALUES
     RealmUUID::class -> if (nullable) NULLABLE_UUID_VALUES else UUID_VALUES
     ByteArray::class -> if (nullable) NULLABLE_BINARY_VALUES else BINARY_VALUES
@@ -799,6 +798,7 @@ internal abstract class ManagedSetTester<T>(
             realm.writeBlocking {
                 val set = typeSafetyManager.createContainerAndGetCollection(this)
                 val element = if (classifier == RealmObject::class) {
+                    @Suppress("UNCHECKED_CAST")
                     copyToRealm(dataSet[0] as RealmObject) as T
                 } else {
                     dataSet[0]

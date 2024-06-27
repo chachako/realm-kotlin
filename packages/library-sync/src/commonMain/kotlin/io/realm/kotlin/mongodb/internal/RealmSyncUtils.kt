@@ -78,26 +78,34 @@ internal fun <T, R> channelResultCallback(
 internal fun convertSyncError(syncError: SyncError): SyncException {
     val errorCode = syncError.errorCode
     val message = createMessageFromSyncError(errorCode)
-    return when (errorCode.errorCode) {
-        ErrorCode.RLM_ERR_WRONG_SYNC_TYPE -> WrongSyncTypeException(message)
+    return if (syncError.isFatal) {
+        // An unrecoverable exception happened
+        UnrecoverableSyncException(message)
+    } else {
+        when (errorCode.errorCode) {
+            ErrorCode.RLM_ERR_WRONG_SYNC_TYPE -> WrongSyncTypeException(message)
 
-        ErrorCode.RLM_ERR_INVALID_SUBSCRIPTION_QUERY -> {
-            // Flexible Sync Query was rejected by the server
-            BadFlexibleSyncQueryException(message)
-        }
-        ErrorCode.RLM_ERR_SYNC_COMPENSATING_WRITE -> CompensatingWriteException(message, syncError.compensatingWrites)
+            ErrorCode.RLM_ERR_INVALID_SUBSCRIPTION_QUERY -> {
+                // Flexible Sync Query was rejected by the server
+                BadFlexibleSyncQueryException(message)
+            }
 
-        ErrorCode.RLM_ERR_SYNC_PROTOCOL_INVARIANT_FAILED,
-        ErrorCode.RLM_ERR_SYNC_PROTOCOL_NEGOTIATION_FAILED,
-        ErrorCode.RLM_ERR_SYNC_PERMISSION_DENIED -> {
-            // Permission denied errors should be unrecoverable according to Core, i.e. the
-            // client will disconnect sync and transition to the "inactive" state
-            UnrecoverableSyncException(message)
-        }
-        else -> {
-            // An error happened we are not sure how to handle. Just report as a generic
-            // SyncException.
-            SyncException(message)
+            ErrorCode.RLM_ERR_SYNC_COMPENSATING_WRITE -> CompensatingWriteException(
+                message,
+                syncError.compensatingWrites
+            )
+            ErrorCode.RLM_ERR_SYNC_PROTOCOL_INVARIANT_FAILED,
+            ErrorCode.RLM_ERR_SYNC_PROTOCOL_NEGOTIATION_FAILED,
+            ErrorCode.RLM_ERR_SYNC_PERMISSION_DENIED -> {
+                // Permission denied errors should be unrecoverable according to Core, i.e. the
+                // client will disconnect sync and transition to the "inactive" state
+                UnrecoverableSyncException(message)
+            }
+            else -> {
+                // An error happened we are not sure how to handle. Just report as a generic
+                // SyncException.
+                SyncException(message)
+            }
         }
     }
 }
@@ -172,39 +180,14 @@ internal fun convertAppError(appError: AppError): Throwable {
             // generic `ServiceException`'s.
             when (appError.code) {
                 ErrorCode.RLM_ERR_INTERNAL_SERVER_ERROR -> {
-                    if (msg.contains("linking an anonymous identity is not allowed") || // Trying to link an anonymous account to a named one.
-                        msg.contains("linking a local-userpass identity is not allowed") // Trying to link two email logins with each other
-                    ) {
-                        CredentialsCannotBeLinkedException(msg)
-                    } else {
-                        ServiceException(msg)
-                    }
+                    ServiceException(msg)
                 }
                 ErrorCode.RLM_ERR_INVALID_SESSION -> {
-                    if (msg.contains("a user already exists with the specified provider")) {
-                        CredentialsCannotBeLinkedException(msg)
-                    } else {
-                        ServiceException(msg)
-                    }
+                    ServiceException(msg)
                 }
                 ErrorCode.RLM_ERR_USER_DISABLED,
                 ErrorCode.RLM_ERR_AUTH_ERROR -> {
-                    // Some auth providers return a generic AuthError when
-                    // invalid credentials are presented. We make a best effort
-                    // to map these to a more sensible `InvalidCredentialsExceptions`
-                    if (msg.contains("invalid API key")) {
-                        // API Key
-                        // See https://github.com/10gen/baas/blob/master/authprovider/providers/apikey/provider.go
-                        InvalidCredentialsException(msg)
-                    } else if (msg.contains("invalid custom auth token:")) {
-                        // Custom JWT
-                        // See https://github.com/10gen/baas/blob/master/authprovider/providers/custom/provider.go
-                        InvalidCredentialsException(msg)
-                    } else {
-                        // It does not look possible to reliably detect Facebook, Google and Apple
-                        // invalid tokens: https://github.com/10gen/baas/blob/master/authprovider/providers/oauth2/oauth.go#L139
-                        AuthException(msg)
-                    }
+                    AuthException(msg)
                 }
                 ErrorCode.RLM_ERR_USER_NOT_FOUND -> {
                     UserNotFoundException(msg)

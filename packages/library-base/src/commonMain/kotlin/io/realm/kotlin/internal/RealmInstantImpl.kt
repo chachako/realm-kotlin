@@ -36,13 +36,17 @@ public fun RealmInstant.toDuration(): Duration {
     return epochSeconds.seconds + nanosecondsOfSecond.nanoseconds
 }
 
-internal fun Duration.toRealmInstant(): RealmInstant {
+public fun Duration.toRealmInstant(): RealmInstant {
     val seconds: Long = this.inWholeSeconds
-    val nanos: Duration = (this - seconds.seconds)
-    return RealmInstant.from(seconds, nanos.inWholeNanoseconds.toInt())
+    // We cannot do duration arithmetic as some operations on INFINITE and NEG_INFINITE will overflow
+    val nanos: Int = (this.inWholeNanoseconds - (seconds * RealmInstant.SEC_AS_NANOSECOND)).toInt()
+    return RealmInstant.from(seconds, nanos)
 }
 
 internal fun RealmInstant.restrictToMillisPrecision() =
     toDuration().inWholeMilliseconds.milliseconds.toRealmInstant()
+@Suppress("NOTHING_TO_INLINE")
+public inline fun RealmInstant.asBsonDateTime(): BsonDateTime = BsonDateTime(toDuration().inWholeMilliseconds)
 
-internal fun RealmInstant.asBsonDateTime() = BsonDateTime(toDuration().inWholeMilliseconds)
+@Suppress("NOTHING_TO_INLINE")
+public inline fun BsonDateTime.asRealmInstant(): RealmInstant = value.milliseconds.toRealmInstant()

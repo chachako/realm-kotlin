@@ -21,6 +21,8 @@ import io.realm.kotlin.internal.util.HEX_PATTERN
 import io.realm.kotlin.internal.util.parseHex
 import io.realm.kotlin.internal.util.toHexString
 import io.realm.kotlin.types.RealmUUID
+import org.mongodb.kbson.BsonBinary
+import org.mongodb.kbson.BsonBinarySubType
 import kotlin.experimental.and
 import kotlin.experimental.or
 
@@ -101,3 +103,8 @@ public class RealmUUIDImpl : RealmUUID {
         }
     }
 }
+@Suppress("NOTHING_TO_INLINE")
+public inline fun RealmUUID.asBsonBinary(): BsonBinary = BsonBinary(BsonBinarySubType.UUID_STANDARD, bytes)
+
+@Suppress("NOTHING_TO_INLINE")
+public inline fun BsonBinary.asRealmUUID(): RealmUUID = RealmUUID.from(data)

@@ -39,7 +39,6 @@ import io.realm.kotlin.test.common.utils.GenericTypeSafetyManager
 import io.realm.kotlin.test.common.utils.assertFailsWithMessage
 import io.realm.kotlin.test.platform.PlatformUtils
 import io.realm.kotlin.test.util.TypeDescriptor
-import io.realm.kotlin.types.ObjectId
 import io.realm.kotlin.types.RealmAny
 import io.realm.kotlin.types.RealmInstant
 import io.realm.kotlin.types.RealmList
@@ -686,7 +685,6 @@ class RealmListTests : EmbeddedObjectCollectionQueryTests {
         Decimal128::class -> if (nullable) NULLABLE_DECIMAL128_VALUES else DECIMAL128_VALUES
         String::class -> if (nullable) NULLABLE_STRING_VALUES else STRING_VALUES
         RealmInstant::class -> if (nullable) NULLABLE_TIMESTAMP_VALUES else TIMESTAMP_VALUES
-        ObjectId::class -> if (nullable) NULLABLE_OBJECT_ID_VALUES else OBJECT_ID_VALUES
         BsonObjectId::class -> if (nullable) NULLABLE_BSON_OBJECT_ID_VALUES else BSON_OBJECT_ID_VALUES
         RealmUUID::class -> if (nullable) NULLABLE_UUID_VALUES else UUID_VALUES
         ByteArray::class -> if (nullable) NULLABLE_BINARY_VALUES else BINARY_VALUES
@@ -713,6 +711,7 @@ class RealmListTests : EmbeddedObjectCollectionQueryTests {
     private val managedTesters: List<ListApiTester<*, RealmListContainer>> by lazy {
         descriptors.map {
             val elementType = it.elementType
+            @Suppress("UNCHECKED_CAST")
             when (val classifier = elementType.classifier) {
                 RealmObject::class -> RealmObjectListTester(
                     realm = realm,
@@ -1379,8 +1378,6 @@ internal val DECIMAL128_VALUES = listOf(DECIMAL128_MAX_VALUE, DECIMAL128_MIN_VAL
 internal val BOOLEAN_VALUES = listOf(true, false)
 internal val TIMESTAMP_VALUES =
     listOf(RealmInstant.from(0, 0), RealmInstant.from(42, 420))
-internal val OBJECT_ID_VALUES =
-    listOf(ObjectId.create(), ObjectId.from("507f191e810c19729de860ea"))
 internal val BSON_OBJECT_ID_VALUES =
     listOf(BsonObjectId(), BsonObjectId("507f191e810c19729de860ea"))
 internal val UUID_VALUES =
@@ -1428,7 +1425,6 @@ internal val NULLABLE_DOUBLE_VALUES = DOUBLE_VALUES + null
 internal val NULLABLE_DECIMAL128_VALUES = DECIMAL128_VALUES + null
 internal val NULLABLE_BOOLEAN_VALUES = BOOLEAN_VALUES + null
 internal val NULLABLE_TIMESTAMP_VALUES = TIMESTAMP_VALUES + null
-internal val NULLABLE_OBJECT_ID_VALUES = OBJECT_ID_VALUES + null
 internal val NULLABLE_BSON_OBJECT_ID_VALUES = BSON_OBJECT_ID_VALUES + null
 internal val NULLABLE_UUID_VALUES = UUID_VALUES + null
 internal val NULLABLE_BINARY_VALUES = BINARY_VALUES + null

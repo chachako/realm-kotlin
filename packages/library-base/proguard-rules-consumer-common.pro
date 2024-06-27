@@ -1,9 +1,5 @@
 ## Keep Companion classes and class.Companion member of all classes that can be used in our API to
 #  allow calling realmObjectCompanionOrThrow and realmObjectCompanionOrNull on the classes
--keep class io.realm.kotlin.types.ObjectId$Companion
--keepclassmembers class io.realm.kotlin.types.ObjectId {
-    io.realm.kotlin.types.ObjectId$Companion Companion;
-}
 -keep class io.realm.kotlin.types.RealmInstant$Companion
 -keepclassmembers class io.realm.kotlin.types.RealmInstant {
     io.realm.kotlin.types.RealmInstant$Companion Companion;
@@ -53,6 +49,10 @@
     *;
 }
 -keep class io.realm.kotlin.internal.interop.sync.AppError {
+    # TODO OPTIMIZE Only keep actually required symbols
+    *;
+}
+-keep class io.realm.kotlin.internal.interop.sync.CoreConnectionState {
     # TODO OPTIMIZE Only keep actually required symbols
     *;
 }

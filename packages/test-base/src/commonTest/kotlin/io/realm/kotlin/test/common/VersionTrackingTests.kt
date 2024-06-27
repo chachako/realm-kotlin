@@ -34,6 +34,7 @@ import io.realm.kotlin.notifications.ResultsChange
 import io.realm.kotlin.test.platform.PlatformUtils
 import io.realm.kotlin.test.util.TestChannel
 import io.realm.kotlin.test.util.receiveOrFail
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.launchIn
@@ -55,7 +56,7 @@ class VersionTrackingTests {
 
     @BeforeTest
     fun setup() {
-        initialLogLevel = RealmLog.level
+        initialLogLevel = RealmLog.getLevel()
         tmpDir = PlatformUtils.createTempDir()
         configuration = RealmConfiguration.Builder(
             schema = setOf(
@@ -65,7 +66,7 @@ class VersionTrackingTests {
                 Sample::class,
                 SampleWithPrimaryKey::class
             ) + embeddedSchema
-        ).directory(tmpDir).log(LogLevel.DEBUG).build()
+        ).directory(tmpDir).build()
         realm = Realm.open(configuration)
     }
 
@@ -75,7 +76,7 @@ class VersionTrackingTests {
             realm.close()
         }
         PlatformUtils.deleteTempDir(tmpDir)
-        RealmLog.level = initialLogLevel
+        RealmLog.setLevel(initialLogLevel)
     }
 
     @Test
@@ -135,6 +136,7 @@ class VersionTrackingTests {
         }
     }
 
+    @OptIn(DelicateCoroutinesApi::class)
     @Test
     fun realmAsFlow_doesNotTrackVersions() = runBlocking {
         realm.activeVersions().run {

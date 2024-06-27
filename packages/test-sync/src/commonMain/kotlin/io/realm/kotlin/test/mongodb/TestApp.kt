@@ -26,13 +26,11 @@ import io.realm.kotlin.internal.interop.SynchronizableObject
 import io.realm.kotlin.internal.interop.sync.NetworkTransport
 import io.realm.kotlin.internal.platform.runBlocking
 import io.realm.kotlin.internal.platform.singleThreadDispatcher
-import io.realm.kotlin.log.LogLevel
-import io.realm.kotlin.log.RealmLog
-import io.realm.kotlin.log.RealmLogger
 import io.realm.kotlin.mongodb.App
 import io.realm.kotlin.mongodb.AppConfiguration
 import io.realm.kotlin.mongodb.Credentials
 import io.realm.kotlin.mongodb.User
+import io.realm.kotlin.mongodb.internal.AppConfigurationImpl
 import io.realm.kotlin.mongodb.sync.SyncConfiguration
 import io.realm.kotlin.test.mongodb.common.FLEXIBLE_SYNC_SCHEMA
 import io.realm.kotlin.test.mongodb.util.AppAdmin
@@ -46,6 +44,7 @@ import io.realm.kotlin.test.util.TestHelper
 import io.realm.kotlin.test.util.use
 import kotlinx.coroutines.CloseableCoroutineDispatcher
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import org.mongodb.kbson.ExperimentalKBsonSerializerApi
 import org.mongodb.kbson.serialization.EJson
 
@@ -93,17 +92,15 @@ open class TestApp private constructor(
      * @param debug enable trace of command server and rest api calls in the test app.
      **/
     @Suppress("LongParameterList")
-    @OptIn(ExperimentalKBsonSerializerApi::class)
+    @OptIn(ExperimentalKBsonSerializerApi::class, ExperimentalCoroutinesApi::class)
     constructor(
         testId: String?,
         appName: String = TEST_APP_PARTITION,
         dispatcher: CoroutineDispatcher = singleThreadDispatcher("$testId-dispatcher"),
-        logLevel: LogLevel? = LogLevel.WARN,
         builder: (AppConfiguration.Builder) -> AppConfiguration.Builder = {
             it.syncRootDirectory(PlatformUtils.createTempDir("$appName-$testId"))
         },
         debug: Boolean = false,
-        customLogger: RealmLogger? = null,
         networkTransport: NetworkTransport? = null,
         ejson: EJson = EJson,
         initialSetup: suspend AppServicesClient.(app: BaasApp, service: Service) -> Unit = { app: BaasApp, service: Service ->
@@ -114,8 +111,6 @@ open class TestApp private constructor(
         build(
             debug = debug,
             appName = appName,
-            logLevel = logLevel,
-            customLogger = customLogger,
             dispatcher = dispatcher,
             builder = builder,
             networkTransport = networkTransport,
@@ -173,7 +168,7 @@ open class TestApp private constructor(
                     // Some tests might render the server inaccessible, preventing us from
                     // deleting users. Assume those tests know what they are doing and
                     // ignore errors here.
-                    RealmLog.warn("Server side users could not be deleted: $ex")
+                    (configuration as AppConfigurationImpl).logger.warn("Server side users could not be deleted: $ex")
                 }
             }
 
@@ -181,6 +176,7 @@ open class TestApp private constructor(
 
             // Tearing down the SyncSession still relies on the the event loop (powered by the coroutines) of the platform networking
             //  to post Function Handler, so we need to close it after we close the App
+            @OptIn(ExperimentalCoroutinesApi::class)
             if (dispatcher is CloseableCoroutineDispatcher) {
                 dispatcher.close()
             }
@@ -203,8 +199,6 @@ open class TestApp private constructor(
         fun build(
             debug: Boolean,
             appName: String,
-            logLevel: LogLevel?,
-            customLogger: RealmLogger?,
             dispatcher: CoroutineDispatcher,
             builder: (AppConfiguration.Builder) -> AppConfiguration.Builder,
             networkTransport: NetworkTransport?,
@@ -229,13 +223,6 @@ open class TestApp private constructor(
                 .networkTransport(networkTransport)
                 .ejson(ejson)
                 .apply {
-                    if (logLevel != null) {
-                        log(
-                            logLevel,
-                            if (customLogger == null) emptyList<RealmLogger>()
-                            else listOf<RealmLogger>(customLogger)
-                        )
-                    }
                     if (SyncServerConfig.usePlatformNetworking) {
                         usePlatformNetworking()
                     }

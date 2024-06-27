@@ -1365,9 +1365,22 @@ actual object RealmInterop {
         realmc.realm_set_log_level(level.priority)
     }
 
+    actual fun realm_set_log_level_category(category: String, level: CoreLogLevel) {
+        realmc.realm_set_log_level_category(category, level.priority)
+    }
+
+    actual fun realm_get_log_level_category(category: String): CoreLogLevel =
+        CoreLogLevel.valueFromPriority(realmc.realm_get_log_level_category(category).toShort())
+
+    actual fun realm_get_category_names(): List<String> {
+        @Suppress("UNCHECKED_CAST")
+        val names: Array<String> = realmc.realm_get_log_category_names() as Array<String>
+        return names.asList()
+    }
+
     actual fun realm_app_config_set_metadata_mode(
         appConfig: RealmAppConfigurationPointer,
-        metadataMode: MetadataMode
+        metadataMode: MetadataMode,
     ) {
         realmc.realm_app_config_set_metadata_mode(
             appConfig.cptr(),
@@ -1698,14 +1711,16 @@ actual object RealmInterop {
         )
     }
 
+    @Suppress("LongParameterList")
     actual fun realm_app_call_function(
         app: RealmAppPointer,
         user: RealmUserPointer,
         name: String,
+        serviceName: String?,
         serializedEjsonArgs: String,
         callback: AppCallback<String>
     ) {
-        realmc.realm_app_call_function(app.cptr(), user.cptr(), name, serializedEjsonArgs, null, callback)
+        realmc.realm_app_call_function(app.cptr(), user.cptr(), name, serializedEjsonArgs, serviceName, callback)
     }
 
     actual fun realm_app_call_reset_password_function(
@@ -2078,22 +2093,23 @@ actual object RealmInterop {
     }
 
     actual fun realm_sync_subscriptionset_insert_or_assign(
-        mutatableSubscriptionSet: RealmMutableSubscriptionSetPointer,
+        mutableSubscriptionSet: RealmMutableSubscriptionSetPointer,
         query: RealmQueryPointer,
         name: String?
     ): Pair<RealmSubscriptionPointer, Boolean> {
         val outIndex = longArrayOf(1)
         val outInserted = BooleanArray(1)
         realmc.realm_sync_subscription_set_insert_or_assign_query(
-            mutatableSubscriptionSet.cptr(),
+            mutableSubscriptionSet.cptr(),
             query.cptr(),
             name,
             outIndex,
             outInserted
         )
+        @Suppress("UNCHECKED_CAST")
         return Pair(
             realm_sync_subscription_at(
-                mutatableSubscriptionSet as RealmSubscriptionSetPointer,
+                mutableSubscriptionSet as RealmSubscriptionSetPointer,
                 outIndex[0]
             ),
             outInserted[0]
